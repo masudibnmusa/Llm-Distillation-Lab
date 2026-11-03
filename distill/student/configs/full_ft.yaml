@@ -1,0 +1,7 @@
+method: full
+epochs: 3
+batch_size: 4
+grad_accum: 4
+lr: 1.0e-5
+max_length: 512
+seed: 42

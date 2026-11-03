@@ -1,0 +1,5 @@
+qwen-0.5b:   {hf_id: Qwen/Qwen2.5-0.5B-Instruct, params_b: 0.5}
+qwen-1.5b:   {hf_id: Qwen/Qwen2.5-1.5B-Instruct, params_b: 1.5}
+qwen-3b:     {hf_id: Qwen/Qwen2.5-3B-Instruct,   params_b: 3}
+qwen-7b:     {hf_id: Qwen/Qwen2.5-7B-Instruct,   params_b: 7}
+distilbert:  {hf_id: distilbert-base-uncased,    params_b: 0.066}
