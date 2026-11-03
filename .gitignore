@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+data/inputs/
+data/gold/
+data/teacher_labels/
+data/curated/
+data/runs/
+*.safetensors
+*.gguf
