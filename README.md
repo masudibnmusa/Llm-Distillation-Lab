@@ -1,215 +1,123 @@
-# distillation-lab
+# LLM Distillation Lab
 
-Distill a large model's behavior on a **narrow task** into a **small, fast, cheap model**, then measure the tradeoff honestly.
+**Turn an expensive large-model API call into a small, fast, self-hosted model, then measure honestly whether it was worth it.**
 
-The deliverable is not just a trained model. It is a measured answer to three questions:
+This project is an end-to-end pipeline for **knowledge distillation**. A large "teacher" model (Claude, via the Anthropic API) labels thousands of inputs for one narrow task. A small open "student" model (Qwen2.5 0.5B–7B) is fine-tuned on those labels. The student is then compared with the teacher and with several baselines on **quality, latency and cost**, using a held-out, human-verified test set.
+
+The output is a report that answers three questions:
 
 1. **Quality:** how much of the teacher's accuracy does the student keep?
-2. **Cost and latency:** how much cheaper and faster is it per 1k requests?
-3. **Break-even:** at what request volume does the student pay for itself, and where does it fail?
+2. **Cost and latency:** how much cheaper and faster is it per 1,000 requests?
+3. **Break-even:** at what request volume does the student pay for itself?
 
-If the answer turns out to be "it doesn't pay off," that is a valid result and the report should say so.
+"It doesn't pay off" is a valid result, and the report is built to say so when it's true.
+
+The example task is support-ticket classification (e.g. [Banking77](https://huggingface.co/datasets/mteb/banking77), 77 categories). The task is defined in a few files, so it can be swapped for another narrow task.
+
+---
+
+## Highlights
+
+| Area | What's implemented |
+|---|---|
+| **LLM data generation** | Teacher labeling with disk caching, retries, cost tracking per call, and self-consistency voting across several samples |
+| **Data quality** | Near-duplicate removal (TF-IDF cosine), train/test leakage protection, agreement-based filtering, class balancing, a human review queue for disputed labels |
+| **Model training** | LoRA and full fine-tuning (TRL `SFTTrainer` + PEFT), white-box logit distillation with KL loss, rationale distillation, an encoder classifier (DistilBERT) |
+| **Evaluation** | Accuracy and macro-F1 with bootstrap 95% confidence intervals, paired significance tests against the teacher, schema validity, calibration (ECE), robustness to perturbations, error analysis by cause |
+| **Systems engineering** | Latency and throughput benchmarks against a vLLM server, a cost model, break-even analysis with sensitivity tables, a confidence-based student→teacher cascade |
+| **Fair comparison** | Every student is compared with a prompted small model (same size, no training) and a TF-IDF floor, so a fine-tune never gets credit it didn't earn |
+
+**Tech stack:** Python · PyTorch · Hugging Face Transformers, TRL, PEFT, Datasets · Anthropic API · vLLM · scikit-learn · pandas · Pydantic · pytest
 
 ---
 
 ## How it works
 
-```
-Unlabeled task inputs
-        ↓
-teacher/labeler.py (+ self_consistency.py)   ← cached, cost-tracked
-        ↓
-curation/ (validity, confidence, balance)
-        ↓
-format_for_sft.py → data/curated/train.jsonl
-        ↓
-student/train_sft.py (LoRA / full FT)
-        ↓
-evaluation/evaluator.py on the gold set
-   ├── teacher                 (ceiling)
-   ├── student (distilled)
-   ├── prompted small model    (baseline to beat)
-   └── TF-IDF classifier       (sanity floor)
-        ↓
-benchmarking/ (latency, throughput, cost, break-even)
-        ↓
-report_builder.py → quality vs. cost vs. latency tradeoff
-        ↓
-errors → more teacher labels on weak areas → retrain
+```mermaid
+flowchart TD
+    A[Unlabeled inputs] --> B[Gold set<br/>human-verified, held out]
+    A --> C[Leakage-safe split<br/>drop gold + near-duplicates]
+    C --> D[Teacher labeling<br/>cached, cost-tracked, voted]
+    D --> E[Curation<br/>validity · agreement · balance · review]
+    E --> F[Student training<br/>LoRA / full FT / KD / classifier]
+    F --> G[Evaluation on gold]
+    B --> G
+    H[Baselines<br/>teacher · prompted small · TF-IDF] --> G
+    G --> I[Benchmarks<br/>latency · throughput · cost]
+    I --> J[Report<br/>quality vs. cost vs. latency + break-even]
+    G -. errors .-> D
 ```
 
-**Core idea:** use the teacher to label a large pool of unlabeled inputs, fine-tune the student on the resulting `(input, teacher output)` pairs, then evaluate the student against both the teacher and human-verified ground truth on a held-out set.
+**Core idea:** the student is judged against **human-verified labels**, not just against the teacher. Matching the teacher alone would hide the teacher's own mistakes being copied.
 
 ---
 
-## Task definition
+## Quickstart
 
-Pick **one** narrow, measurable task. The narrower the task, the better distillation works.
-
-| Field | Value |
-|---|---|
-| Task | _e.g. classify support tickets into N categories_ |
-| Input format | _e.g. free-text ticket, 1-500 tokens_ |
-| Output format | _e.g. JSON `{"category": "...", "confidence": 0.0}`_ |
-| Dataset | _e.g. Banking77, or your own inputs_ |
-| Success criteria | _e.g. student within 2 points of teacher accuracy on gold set_ |
-| Out of scope | The student is **not** a general assistant. Off-task inputs should be rejected. |
-
-Good tasks: ticket classification, invoice field extraction, query routing, fixed-format summarization.
-Bad tasks: "be a general assistant."
-
-Full spec lives in `distill/task/task_spec.md`.
-
----
-
-## Project structure
-
-```
-distillation-lab/
-├── distill/
-│   ├── cli.py                  # distill label | train | eval | report
-│   ├── config.py               # teacher/student models, task spec, paths
-│   ├── task/                   # spec, Pydantic schema, teacher prompts, scoring
-│   ├── data/                   # input collection, gold builder, splitter, dedup, stats
-│   ├── teacher/                # API client, labeler, self-consistency, cost ledger
-│   ├── curation/               # validity/confidence filters, balancing, review queue, SFT formatting
-│   ├── student/                # SFT (LoRA/full), optional logit distill, optional encoder classifier
-│   ├── baselines/              # prompted small/mid model, TF-IDF + logistic regression
-│   ├── evaluation/             # evaluator, metrics, agreement, error analysis, calibration, significance, robustness
-│   ├── benchmarking/           # latency, throughput, cost model, break-even
-│   ├── serving/                # quantize, serve (vLLM/Ollama), cascade router
-│   └── reporting/              # report builder, plots
-├── data/
-│   ├── inputs/                 # unlabeled task inputs
-│   ├── gold/                   # human-verified eval set (NEVER trained on)
-│   ├── teacher_labels/         # cached teacher outputs (JSONL)
-│   ├── curated/                # train.jsonl / val.jsonl
-│   └── runs/                   # results per experiment
-├── notebooks/                  # label inspection, error analysis
-├── tests/                      # validity filter, splitter leakage, scoring, break-even
-├── .env.example
-├── requirements.txt
-├── README.md
-└── run.sh
-```
-
----
-
-## Setup
-
-**Requirements**
-
-- Python 3.10+
-- A GPU for student fine-tuning (see [Compute](#compute))
-- An API key for the teacher model (or an open teacher you can host)
-
-**Install**
+**Requirements:** Python 3.10+, an [Anthropic API key](https://console.anthropic.com/), and a GPU for student training (a free Colab GPU is enough for 0.5B–1.5B students).
 
 ```bash
 git clone https://github.com/masudibnmusa/Llm-Distillation-Lab.git
-cd distillation-lab
+cd Llm-Distillation-Lab
 
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env             # then add your API keys
+
+cp .env.example .env               # then add ANTHROPIC_API_KEY (and HF_TOKEN if needed)
 ```
 
-**`requirements.txt` (core)**
-
-```
-transformers
-trl
-peft
-datasets
-vllm
-anthropic
-scikit-learn
-pydantic
-pandas
-matplotlib
-```
-
-**`.env.example`**
-
-```
-ANTHROPIC_API_KEY=your-key-here
-HF_TOKEN=your-huggingface-token
-```
-
-### Compute
-
-| Student size | Typical setup |
-|---|---|
-| 0.5B-1.5B | Free/low-cost Colab GPU, LoRA |
-| 3B | 16-24 GB GPU, LoRA/QLoRA |
-| 8B | 24 GB+ GPU, QLoRA |
-
-Decide early whether you are using Colab, a rented GPU, or local hardware. If compute is tight, start with 0.5B-1.5B students.
-
----
-
-## Quickstart (v1 path)
-
-Keep the first version small. Add the rest only after this works end to end.
-
-**v1 scope:** schema, gold set, teacher labeling, one student fine-tune, evaluation, break-even.
+**Minimal run** (one student, end to end):
 
 ```bash
-# 1. Define the task: edit distill/task/task_spec.md, schema.py, prompt_templates.py
+D="python -m distill.cli"
 
-# 2. Collect inputs and build the gold set (200 examples to start)
-python -m distill.cli collect --hf mteb/banking77 --text-col text --label-col label_text --limit 10000
-python -m distill.cli gold --n 200            # label by hand; or add --use-source-labels
+$D collect --hf mteb/banking77 --text-col text --label-col label_text --limit 10000
+$D gold --n 300 --use-source-labels      # or `$D gold --n 300` to label by hand
+$D split                                 # leakage-safe pool + train/val split
 
-# 3. Split with leakage protection
-python -m distill.cli split
+$D eval --system teacher                 # quality ceiling
+$D eval --system prompted_small          # baseline to beat
 
-# 4. Measure the teacher ceiling on gold
-python -m distill.cli eval --system teacher
+$D label --samples 3                     # teacher labels the pool, 3-sample vote
+$D curate --min-agreement 0.67
+$D eval --system tfidf                   # sanity floor
 
-# 5. Run baselines
-python -m distill.cli eval --system prompted_small
+$D train --student qwen-1.5b --config distill/student/configs/lora.yaml --tag qwen-1.5b
+$D eval --system student --model qwen-1.5b
 
-# 6. Label the input pool (cached and cost-tracked), then curate
-python -m distill.cli label --samples 3
-python -m distill.cli curate --min-agreement 0.67
-python -m distill.cli eval --system tfidf     # trained on the curated teacher labels
-
-# 7. Train one student
-python -m distill.cli train --student qwen-1.5b --config distill/student/configs/lora.yaml --tag qwen-1.5b
-
-# 8. Evaluate the student and compare
-python -m distill.cli eval --system student --model qwen-1.5b
-
-# 9. Break-even analysis and report
-python -m distill.cli breakeven --gpu-hourly 1.0 --student-rps 20
-python -m distill.cli report
+$D breakeven --gpu-hourly 1.0 --student-rps 20
+$D report                                # writes data/runs/report.md
 ```
 
-`run.sh` runs the full pipeline, including the learning curve, robustness, cascade and latency benchmarks.
+**Full run:** [`run.sh`](run.sh) adds a learning curve (500 → 5,000 training examples), robustness tests, the cascade sweep and latency benchmarks.
+
+**Run the tests** (no GPU or API key needed):
+
+```bash
+pytest -q
+```
 
 ---
 
 ## CLI reference
 
-All commands run as `python -m distill.cli <command>`. Every evaluation uses the gold set unless you pass `--file`.
+All commands run as `python -m distill.cli <command>`. Evaluations use the gold set unless `--file` is passed.
 
 | Command | Purpose |
 |---|---|
-| `collect` | Gather unlabeled inputs from a HF dataset, JSONL or CSV |
+| `collect` | Gather unlabeled inputs from a Hugging Face dataset, JSONL or CSV |
 | `synth` | Teacher-generated inputs to fill coverage gaps |
-| `gold` | Build the human-labeled gold eval set |
+| `gold` | Build the human-labeled gold test set |
 | `split` | Leakage-safe train/val split (drops gold and near-duplicates of gold) |
-| `label` | Run the teacher over the pool, with caching, retries, optional self-consistency voting |
+| `label` | Run the teacher over the pool (`--samples N` for self-consistency, `--rationales`) |
 | `curate` | Filter, balance and format training data (`--review` to hand-label disputed examples) |
-| `train` | Fine-tune the student (`--kind sft` LoRA/full, `kd` logit distillation, `classifier` encoder) |
-| `eval` | Evaluate any system (teacher, mid, prompted_small, tfidf, student, classifier) |
-| `robust` | Accuracy under perturbations, and confidence on off-task inputs |
-| `bench` | `latency` (sequential) or `throughput` (against a vLLM server) |
-| `breakeven` | Request volume at which the student pays for itself, with sensitivity table |
-| `cascade` | Offline sweep of student-then-teacher routing thresholds |
+| `train` | Train a student: `--kind sft` (LoRA/full), `kd` (logit distillation), `classifier` (encoder) |
+| `eval` | Evaluate `teacher`, `mid`, `prompted_small`, `tfidf`, `student` or `classifier` |
+| `robust` | Accuracy under perturbations (typos, truncation, noise) and confidence on off-task inputs |
+| `bench` | `latency` (sequential) or `throughput` (concurrent, against a vLLM server) |
+| `breakeven` | Request volume where the student pays for itself, with a sensitivity table |
+| `cascade` | Offline sweep of student→teacher routing thresholds: accuracy vs. cost |
 | `report` | Build the quality vs. cost vs. latency summary |
 
 ---
@@ -218,141 +126,118 @@ All commands run as `python -m distill.cli <command>`. Every evaluation uses the
 
 | System | Role |
 |---|---|
-| **Teacher** (large API/open model) | Quality ceiling, cost reference |
-| **Student** (distilled small model) | The thing being evaluated |
-| **Prompted small model** | Baseline to beat: same size as student, few-shot prompt, no training |
-| **Prompted mid-tier model** | Cheaper tier of the teacher family |
-| **TF-IDF + logistic regression** | Sanity floor for classification tasks |
-| **Cascade** (student, then teacher) | Student handles confident inputs, teacher handles the rest |
+| **Teacher** (Claude Sonnet 5.5 by default) | Quality ceiling and cost reference |
+| **Student** (distilled Qwen2.5) | The system being evaluated |
+| **Prompted small model** | Same base model as the student, few-shot prompt, no training: the baseline to beat |
+| **Mid-tier model** (Claude Haiku 5.5) | A cheaper API option, to check whether distillation beats simply switching models |
+| **TF-IDF + logistic regression** | Sanity floor, trained on the same teacher labels |
+| **Cascade** | The student answers confident cases and sends the rest to the teacher |
 
-If the prompted small model gets close to the student, distillation may not be worth it. Always include that baseline.
-
----
-
-## Evaluation methodology
-
-- **Gold set:** 200-500 human-verified examples, held out and never used for training.
-- **Measure against truth, not only the teacher.** Student-teacher agreement alone hides copied noise.
-- **Metrics:** accuracy, F1, schema validity rate, judge score where applicable.
-- **Breakdowns:** per category and per difficulty.
-- **Significance:** bootstrap confidence intervals on the quality gap.
-- **Leakage control:** deduplicate near-duplicates across train/val/gold.
-- **Robustness:** out-of-distribution, messy, and adversarial inputs tested explicitly.
-- **Calibration:** check that the student's confidence is meaningful (required for cascades).
-- **Learning curve:** train on 500, 1k, 2k, 5k, 10k examples to find where quality plateaus.
+If the prompted small model gets close to the student, the fine-tune isn't adding much. The report makes that visible.
 
 ---
 
-## Cost, latency, and break-even
+## Project structure
 
-For each system, measure:
-
-- **Latency:** p50 / p95, time to first token, tokens/sec
-- **Throughput:** requests/sec under realistic concurrency (not a single request)
-- **Cost per 1k requests:** API pricing for the teacher, GPU hours for the student
-
-**Break-even** is the request volume where the one-time distillation cost plus student hosting beats paying the teacher per call.
-
-Include in the accounting:
-
-- Teacher labeling spend
-- GPU training cost
-- Student hosting and monitoring
-- Retraining when the task drifts
-- Engineering time
-
-Report **sensitivity** to GPU price, utilization, and volume instead of a single number.
-
----
-
-## Distillation flavors
-
-| Flavor | What it does | Notes |
-|---|---|---|
-| **Black-box (sequence-level)** | Train on teacher output text only | Practical default; works with any API model |
-| **White-box (logit)** | Match teacher token distributions with KL loss | Richer signal; needs an open teacher |
-| **Rationale / reasoning** | Train on reasoning plus answer | Helps harder tasks; drop reasoning at serving time to save tokens |
-| **Self-distillation / rejection sampling** | Sample several answers, keep only verified ones | Cleaner data than a single output |
+```
+distill/
+├── cli.py              # single entry point for every pipeline step
+├── config.py           # paths, models, prices, JSONL helpers
+├── task/               # task spec, Pydantic output schema, prompts, scoring
+├── data/               # input collection, gold builder, splitter, dedup, stats
+├── teacher/            # API client (cache/retry/cost), labeler, voting, rationales, cost ledger
+├── curation/           # validity/agreement filters, balancing, review queue, SFT formatting
+├── student/            # SFT (LoRA/full), logit distillation, encoder classifier, model zoo
+├── baselines/          # prompted small/mid models, TF-IDF baseline
+├── evaluation/         # evaluator, metrics, significance, calibration, robustness, error analysis
+├── benchmarking/       # latency, throughput, cost model, break-even
+├── serving/            # LoRA merge + quantization, vLLM/Ollama serving, cascade router
+└── reporting/          # markdown report and plots
+notebooks/              # label inspection, error analysis
+tests/                  # scoring, validity filter, splitter leakage, break-even
+data/                   # created at runtime (git-ignored)
+```
 
 ---
 
-## Key challenges and pitfalls
+## Design decisions
 
-- **The student inherits the teacher's mistakes.** Check against gold labels.
-- **Input coverage matters most.** The student only learns what the inputs cover. Include hard and rare cases.
-- **Narrowness is the point.** Make the task boundary explicit; consider an off-task guard.
-- **More data has diminishing returns.** Use the learning curve before spending more on labels.
-- **Label noise.** Self-consistency voting and dropping low-agreement examples often beats adding more data.
-- **Fair baselines.** A strong few-shot small model may make distillation unnecessary.
-- **Honest cost accounting.** Distillation only wins at sufficient volume.
-- **Latency vs. throughput.** Real savings depend on batching and GPU utilization.
-- **Drift.** When categories or inputs change, relabel and retrain. A cascade makes drift easier to catch.
-- **Cascades often beat pure replacement.** Calibration quality decides how well they work.
-- **Evaluation leakage.** Near-duplicates between train and gold inflate results.
-
----
-
-## Build order
-
-1. Task spec, output schema, and gold evaluation set
-2. Teacher accuracy on gold (the ceiling) and cost per request
-3. Baselines: prompted small model and classical model (the floor)
-4. Teacher labeling on the full input pool, with caching and cost tracking
-5. Curation, first student fine-tune, gold evaluation
-6. Learning curve over training set size
-7. Error analysis, targeted relabeling, retraining
-8. Latency, throughput, and cost benchmarking under load
-9. Break-even analysis and confidence-based cascade
-10. Final report: quality vs. cost vs. latency, with confidence intervals
-
----
-
-## Variants worth trying
-
-- **Student size sweep:** 0.5B vs. 1.5B vs. 3B vs. 8B, to find the smallest model that clears your quality bar
-- **Rationale distillation vs. answer-only:** is the extra token cost worth it?
-- **Encoder classifier vs. generative student:** a small BERT-style model can be 10-100x cheaper for classification
-- **Multi-teacher ensembles:** keep only agreed answers for cleaner data
-- **Structured-output specialist:** train for valid JSON on a specific schema and measure validity rate
-- **Active learning loop:** use student uncertainty to choose which inputs get teacher or human labels next
-
----
-
-## Terms of service and data rights
-
-Before investing time:
-
-- Check whether the teacher provider's terms allow using outputs to train another model.
-- Check whether your input data (especially customer data) may be sent to a third-party API at all.
-- An open teacher (e.g., Llama or Qwen family) avoids the first problem and enables white-box distillation.
-
----
-
-## Reference points
-
-- Hinton et al., *Distilling the Knowledge in a Neural Network*: the classic reference
-- DistilBERT: the standard worked example
-- Hsieh et al., *Distilling Step-by-Step*: rationale-based distillation with small data requirements
-- Alpaca, Orca, Zephyr: black-box distillation into open models, worth reading for pitfalls
-- Hugging Face **TRL** (`SFTTrainer`) and **peft** for training
-- **vLLM** for fast serving and benchmarking
-- Hugging Face **distilabel** for generating and filtering synthetic training data
+- **Gold labels, not teacher agreement, are the measure of quality.** The gold set is never used for training or few-shot examples. The splitter also removes near-duplicates of gold items from the training pool, so scores aren't inflated by leakage.
+- **Every result comes with a confidence interval.** Accuracy uses a bootstrap 95% CI. The gap to the teacher uses a *paired* bootstrap on the same examples, which tells you whether a difference is real or noise.
+- **Teacher calls are cached and paid for once.** Responses are cached on disk by request content, so re-runs are free, and each paid call is logged to a cost ledger. Truncated or refused replies are not cached, so they get retried.
+- **Noisy labels are filtered, not just piled up.** Self-consistency voting gives each label an agreement score. Low-agreement examples go to a human review queue instead of into training.
+- **Cost is a range, not one number.** Break-even includes labeling, training GPU hours, hosting and (optionally) engineering time, and is reported across GPU prices and utilization levels.
+- **Cascades need calibrated confidence.** The student's sequence probability is checked with reliability bins and ECE before it is used to route requests.
 
 ---
 
 ## Results
 
-> Fill this in after the final report.
+> **Not run yet.** This table will be filled in from `data/runs/report.md` after a full run.
 
 | System | Accuracy (95% CI) | Schema validity | p50 latency | p95 latency | $/1k requests |
 |---|---|---|---|---|---|
 | Teacher | | | | | |
-| Student | | | | | |
+| Student (Qwen2.5-1.5B, LoRA) | | | | | |
 | Prompted small | | | | | |
 | TF-IDF | | | | | |
 | Cascade | | | | | |
 
+Success criteria for the example task are in [`distill/task/task_spec.md`](distill/task/task_spec.md): the student within 2 points of teacher accuracy, ≥ 99% valid outputs, p95 latency under 200 ms, and under 10% of the teacher's cost per 1k requests.
+
 ---
 
+## Adapting it to a new task
+
+1. Describe the task in `distill/task/task_spec.md`.
+2. Set the label list in `data/labels.json` (`collect` writes it automatically when the source dataset has labels).
+3. Adjust the prompts in `distill/task/prompt_templates.py` and the output schema in `distill/task/schema.py`.
+4. Build a gold set of 200–500 human-verified examples before training anything.
+
+Narrow tasks with a fixed output format work best: classification, routing, field extraction, fixed-format summaries. "Be a general assistant" doesn't distill well.
+
+---
+
+## Configuration
+
+Set in `.env` (see [`.env.example`](.env.example)):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | – | Teacher API access |
+| `TEACHER_MODEL` | `claude-sonnet-5-5` | Model that labels the data |
+| `MID_MODEL` | `claude-haiku-5-5` | Cheaper API baseline |
+| `SMALL_BASELINE_MODEL` | `Qwen/Qwen2.5-1.5B-Instruct` | Prompted baseline; keep it equal to the student's base model |
+| `GPU_HOURLY_USD` | `1.0` | GPU price used in the cost and break-even analysis |
+
+Model prices live in `distill/config.py`. Check them against the provider's pricing page before reporting numbers.
+
+---
+
+## Known pitfalls this project guards against
+
+- **The student copies the teacher's mistakes.** Measured with agreement split by whether the teacher was right or wrong.
+- **Leakage between training and test data.** Handled by exact and near-duplicate removal against the gold set.
+- **Unfair baselines.** A strong few-shot small model can make distillation unnecessary, so it's always included.
+- **More data, diminishing returns.** The learning curve shows where quality levels off before more is spent on labels.
+- **Measuring latency instead of throughput.** Real savings depend on batching, so throughput is measured under concurrency.
+- **Terms of use.** Check that the teacher provider's terms allow training on its outputs, and that your input data may be sent to a third-party API. An open teacher (e.g. Qwen2.5-7B) avoids both and enables logit distillation.
+
+---
+
+## References
+
+- Hinton et al., [*Distilling the Knowledge in a Neural Network*](https://arxiv.org/abs/1503.02531) (2015)
+- Sanh et al., [*DistilBERT*](https://arxiv.org/abs/1910.01108) (2019)
+- Hsieh et al., [*Distilling Step-by-Step*](https://arxiv.org/abs/2305.02301) (2023)
+- Hugging Face [TRL](https://github.com/huggingface/trl), [PEFT](https://github.com/huggingface/peft) and [vLLM](https://github.com/vllm-project/vllm)
+
+---
+
+## Author
+
+**Masud Ibn Musa** · [GitHub @masudibnmusa](https://github.com/masudibnmusa)
+
 ## License
-MIT.
+
+MIT, see [LICENSE](LICENSE).
