@@ -1,5 +1,14 @@
 # LLM Distillation Lab
 
+[![tests](https://github.com/masudibnmusa/Llm-Distillation-Lab/actions/workflows/tests.yml/badge.svg)](https://github.com/masudibnmusa/Llm-Distillation-Lab/actions/workflows/tests.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-TRL%20%7C%20PEFT-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/docs/trl)
+[![Anthropic API](https://img.shields.io/badge/teacher-Anthropic%20API-191919?logo=anthropic&logoColor=white)](https://docs.anthropic.com/)
+[![vLLM](https://img.shields.io/badge/serving-vLLM-30A2FF)](https://github.com/vllm-project/vllm)
+[![Last commit](https://img.shields.io/github/last-commit/masudibnmusa/Llm-Distillation-Lab)](https://github.com/masudibnmusa/Llm-Distillation-Lab/commits/main)
+
 **Turn an expensive large-model API call into a small, fast, self-hosted model, then measure honestly whether it was worth it.**
 
 This project is an end-to-end pipeline for **knowledge distillation**. A large "teacher" model (Claude, via the Anthropic API) labels thousands of inputs for one narrow task. A small open "student" model (Qwen2.5 0.5B–7B) is fine-tuned on those labels. The student is then compared with the teacher and with several baselines on **quality, latency and cost**, using a held-out, human-verified test set.
