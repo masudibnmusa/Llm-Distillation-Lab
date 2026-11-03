@@ -14,11 +14,10 @@ def label_all(inputs: list[dict], n_samples: int = 1, workers: int = 8,
     client = TeacherClient(model)
     done = {r["id"] for r in read_jsonl(out)}
     todo = [x for x in inputs if x["id"] not in done]
-    temp = 0.0 if n_samples == 1 else 0.7
     lock = threading.Lock()
 
     def work(x):
-        raws = [client.complete(teacher_messages(x["text"]), system=SYSTEM, temperature=temp,
+        raws = [client.complete(teacher_messages(x["text"]), system=SYSTEM,
                                 sample_idx=i, tag="label")[0] for i in range(n_samples)]
         row = {"id": x["id"], "text": x["text"], "raw": raws, **vote(raws)}
         with lock:

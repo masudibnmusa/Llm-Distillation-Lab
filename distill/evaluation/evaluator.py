@@ -6,6 +6,8 @@ from distill.evaluation import metrics
 
 
 def build_system(name: str, model: str | None = None, no_cache: bool = False):
+    if name in ("student", "classifier") and not model:
+        raise SystemExit(f"--system {name} needs --model <trained tag> (a folder under data/runs/models/)")
     if name in ("teacher", "mid"):
         from distill.baselines.prompted_mid_model import APISystem
         return APISystem(TEACHER_MODEL if name == "teacher" else MID_MODEL, use_cache=not no_cache)

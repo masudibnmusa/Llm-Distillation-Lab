@@ -11,7 +11,8 @@ def test_near_dup_detected():
 def test_no_overlap_between_gold_and_pool():
     texts = [f"unique ticket number {i} about topic {chr(97 + i % 26)}{chr(97 + i // 26)}" for i in range(60)]
     inputs = [{"id": str(i), "text": t} for i, t in enumerate(texts)]
-    gold = inputs[:10] + [{"id": "x", "text": texts[11] + " please"}]   # near-dup of an input
+    # near-dup of input 11: same words, different case/punctuation, so a different id
+    gold = inputs[:10] + [{"id": "x", "text": texts[11].upper() + "!!"}]
     pool, split = make_split(inputs, gold)
     gold_ids = {g["id"] for g in gold}
     assert not gold_ids & {x["id"] for x in pool}

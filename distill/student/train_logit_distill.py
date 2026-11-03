@@ -10,6 +10,7 @@ from datasets import Dataset
 from transformers import (AutoModelForCausalLM, AutoTokenizer, DataCollatorForSeq2Seq,
                           Trainer, TrainingArguments)
 from distill.config import CURATED_DIR, MODELS_DIR, ROOT, read_jsonl
+from distill.curation.format_for_sft import has_rationale
 
 ZOO = ROOT / "distill/student/model_zoo.yaml"
 
@@ -70,4 +71,5 @@ def train(student: str, teacher_id: str, tag: str, n_train: int | None = None,
     secs = time.time() - t0
     trainer.save_model(str(out)); tok.save_pretrained(str(out))
     (out / "meta.json").write_text(json.dumps({"kind": "kd", "student": student, "base_id": base_id,
-                                               "method": "full", "n_train": len(rows), "train_seconds": secs}))
+                                               "method": "full", "n_train": len(rows), "train_seconds": secs,
+                                               "rationale": has_rationale(rows)}))

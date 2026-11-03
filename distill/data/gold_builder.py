@@ -20,6 +20,8 @@ def prompt_label(text: str, default: str | None = None):
             return default
         elif s.isdigit() and int(s) < len(LABELS):
             return LABELS[int(s)]
+        elif s in LABELS:   # an exact name wins even if it is a prefix of another label
+            return s
         else:
             m = [l for l in LABELS if l.startswith(s)] if s else []
             if len(m) == 1:

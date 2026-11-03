@@ -160,44 +160,57 @@ Keep the first version small. Add the rest only after this works end to end.
 # 1. Define the task: edit distill/task/task_spec.md, schema.py, prompt_templates.py
 
 # 2. Collect inputs and build the gold set (200 examples to start)
-python -m distill.data.input_collector
-python -m distill.data.gold_builder
+python -m distill.cli collect --hf mteb/banking77 --text-col text --label-col label_text --limit 10000
+python -m distill.cli gold --n 200            # label by hand; or add --use-source-labels
 
 # 3. Split with leakage protection
-python -m distill.data.splitter
+python -m distill.cli split
 
 # 4. Measure the teacher ceiling on gold
-distill eval --system teacher --split gold
+python -m distill.cli eval --system teacher
 
 # 5. Run baselines
-distill eval --system prompted_small --split gold
-distill eval --system tfidf --split gold
+python -m distill.cli eval --system prompted_small
 
-# 6. Label the input pool (cached and cost-tracked)
-distill label --samples 3
+# 6. Label the input pool (cached and cost-tracked), then curate
+python -m distill.cli label --samples 3
+python -m distill.cli curate --min-agreement 0.67
+python -m distill.cli eval --system tfidf     # trained on the curated teacher labels
 
-# 7. Curate and format, then train one student
-distill train --student qwen-1.5b --config distill/student/configs/lora.yaml
+# 7. Train one student
+python -m distill.cli train --student qwen-1.5b --config distill/student/configs/lora.yaml --tag qwen-1.5b
 
 # 8. Evaluate the student and compare
-distill eval --system student --split gold
+python -m distill.cli eval --system student --model qwen-1.5b
 
-# 9. Build the report with the break-even analysis
-distill report
+# 9. Break-even analysis and report
+python -m distill.cli breakeven --gpu-hourly 1.0 --student-rps 20
+python -m distill.cli report
 ```
 
-> Command names above are the intended interface; adjust to match your `cli.py` as you implement it.
+`run.sh` runs the full pipeline, including the learning curve, robustness, cascade and latency benchmarks.
 
 ---
 
 ## CLI reference
 
+All commands run as `python -m distill.cli <command>`. Every evaluation uses the gold set unless you pass `--file`.
+
 | Command | Purpose |
 |---|---|
-| `distill label` | Run the teacher over inputs, with caching, retries, optional self-consistency voting |
-| `distill train` | Curate data and fine-tune the student (LoRA/QLoRA or full FT) |
-| `distill eval` | Evaluate any system (teacher, student, baseline) on the gold set |
-| `distill report` | Build the quality vs. cost vs. latency summary and plots |
+| `collect` | Gather unlabeled inputs from a HF dataset, JSONL or CSV |
+| `synth` | Teacher-generated inputs to fill coverage gaps |
+| `gold` | Build the human-labeled gold eval set |
+| `split` | Leakage-safe train/val split (drops gold and near-duplicates of gold) |
+| `label` | Run the teacher over the pool, with caching, retries, optional self-consistency voting |
+| `curate` | Filter, balance and format training data (`--review` to hand-label disputed examples) |
+| `train` | Fine-tune the student (`--kind sft` LoRA/full, `kd` logit distillation, `classifier` encoder) |
+| `eval` | Evaluate any system (teacher, mid, prompted_small, tfidf, student, classifier) |
+| `robust` | Accuracy under perturbations, and confidence on off-task inputs |
+| `bench` | `latency` (sequential) or `throughput` (against a vLLM server) |
+| `breakeven` | Request volume at which the student pays for itself, with sensitivity table |
+| `cascade` | Offline sweep of student-then-teacher routing thresholds |
+| `report` | Build the quality vs. cost vs. latency summary |
 
 ---
 

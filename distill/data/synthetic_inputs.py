@@ -16,9 +16,11 @@ def generate(per_label: int = 50, labels: list[str] | None = None) -> None:
             f"'{label}'. Vary length, tone, and writing quality (typos, slang, missing context, "
             f"multi-issue messages). Return ONLY a JSON array of strings."
         )
-        raw, _ = client.complete([{"role": "user", "content": prompt}], temperature=1.0,
-                                 max_tokens=4000, tag="synth")
+        raw, _ = client.complete([{"role": "user", "content": prompt}], max_tokens=16000, tag="synth")
         m = re.search(r"\[.*\]", raw, re.S)
+        if not m:
+            print(f"could not parse synthetic batch for {label}")
+            continue
         try:
             rows += [{"text": t, "source_label": None} for t in json.loads(m.group(0)) if isinstance(t, str)]
         except Exception:

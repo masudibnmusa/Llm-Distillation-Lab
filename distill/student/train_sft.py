@@ -9,6 +9,7 @@ from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 from distill.config import CURATED_DIR, MODELS_DIR, ROOT
+from distill.curation.format_for_sft import has_rationale
 
 ZOO = ROOT / "distill/student/model_zoo.yaml"
 
@@ -48,5 +49,5 @@ def train(student: str, config_path: str, tag: str, n_train: int | None = None) 
     tok.save_pretrained(str(out))
     (out / "meta.json").write_text(json.dumps({
         "kind": "sft", "student": student, "base_id": base_id, "method": cfg["method"],
-        "n_train": len(ds["train"]), "train_seconds": secs}))
+        "n_train": len(ds["train"]), "train_seconds": secs, "rationale": has_rationale(ds["train"])}))
     print(f"saved to {out} ({secs / 60:.1f} min)")

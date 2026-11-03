@@ -43,10 +43,12 @@ MID_MODEL = os.getenv("MID_MODEL", "claude-haiku-5-5")
 # Keep this equal to the student's base model so the prompted baseline is a fair comparison.
 SMALL_BASELINE_MODEL = os.getenv("SMALL_BASELINE_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
 
-# USD per 1M tokens (input, output). REPLACE with current numbers from the provider's pricing page.
+# USD per 1M tokens (input, output), Anthropic list prices. Check the provider's pricing page
+# before reporting numbers. Unknown models cost 0 in the ledger, so add any model you switch to.
 PRICES = {
-    TEACHER_MODEL: (3.0, 15.0),
-    MID_MODEL: (1.0, 5.0),
+    "claude-opus-5-5": (4.0, 20.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
+    "claude-haiku-5-5": (0.10, 0.50),   # prompts up to 100K tokens
 }
 
 GPU_HOURLY_USD = float(os.getenv("GPU_HOURLY_USD", "1.0"))

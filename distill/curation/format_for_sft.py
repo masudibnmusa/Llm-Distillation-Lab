@@ -12,6 +12,11 @@ from distill.task.prompt_templates import student_messages
 from distill.task.schema import to_json
 
 
+def has_rationale(examples) -> bool:
+    """True if completions carry a reasoning line before the JSON (curate --rationale)."""
+    return any(not ex["completion"][0]["content"].lstrip().startswith("{") for ex in examples)
+
+
 def to_example(text: str, label: str, rationale: str | None = None) -> dict:
     completion = (rationale + "\n" if rationale else "") + to_json(label)
     return {"prompt": student_messages(text),
@@ -35,12 +40,15 @@ def build(min_agreement: float = 0.67, max_per_class: int | None = None, rationa
     train, queue = collect(split["train"])
     val, _ = collect(split["val"])
     write_queue(queue)
+    if rationale:   # filter BEFORE truncating, so train_N really has N rows; keep val in the same format
+        train = [r for r in train if r["id"] in rats]
+        val = [r for r in val if r["id"] in rats]
     train = balance(train, max_per_class, seed)
     random.Random(seed).shuffle(train)
     if n_train:
+        if len(train) < n_train:
+            print(f"warning: only {len(train)} curated examples available, fewer than --n-train {n_train}")
         train = train[:n_train]
-    if rationale:
-        train = [r for r in train if r["id"] in rats]
 
     mk = lambda r: to_example(r["text"], r["label"], rats.get(r["id"]))
     name = f"train_{n_train}.jsonl" if n_train else "train.jsonl"

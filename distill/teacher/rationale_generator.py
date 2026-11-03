@@ -18,7 +18,7 @@ def generate_rationales(workers: int = 8, min_agreement: float = 0.67) -> None:
         prompt = (f"Support message:\n{r['text']}\n\nCorrect category: {r['label']}\n"
                   "In one or two sentences, explain why this message belongs to that category. "
                   "Be concrete and do not mention that you were given the answer.")
-        text, _ = client.complete([{"role": "user", "content": prompt}], max_tokens=120, tag="rationale")
+        text, _ = client.complete([{"role": "user", "content": prompt}], max_tokens=1024, tag="rationale")
         with lock:
             append_jsonl(RATIONALE_FILE, {"id": r["id"], "rationale": text.strip()})
 

@@ -65,6 +65,8 @@ def main():
 
     s = sub.add_parser("cascade")
     s.add_argument("--student-run", required=True); s.add_argument("--teacher-run", default="teacher")
+    s.add_argument("--student-usd-per-1k", type=float,
+                   help="student serving cost; default: from the latest throughput bench at 50%% utilization")
 
     sub.add_parser("report")
     a = p.parse_args()
@@ -151,7 +153,7 @@ def main():
 
     elif a.cmd == "cascade":
         from distill.serving.cascade_router import sweep
-        print(sweep(a.student_run, a.teacher_run).to_string(index=False))
+        print(sweep(a.student_run, a.teacher_run, student_usd_per_1k=a.student_usd_per_1k).to_string(index=False))
 
     elif a.cmd == "report":
         from distill.reporting.report_builder import build

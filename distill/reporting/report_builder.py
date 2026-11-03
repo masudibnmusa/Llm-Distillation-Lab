@@ -57,8 +57,8 @@ def build() -> str:
               f"- **Break-even: {'%.0f requests/month' % v if v else 'not reached in the tested range'}**", ""]
         if be.get("sensitivity"):
             L += [_table(list(be["sensitivity"][0].keys()),
-                         [[("%.0f" % x if isinstance(x, float) else x) if x is not None else "never"
-                           for x in r.values()] for r in be["sensitivity"]]), ""]
+                         [[x if k == "gpu_hourly_usd" else ("never" if x is None else "%.0f" % x)
+                           for k, x in r.items()] for r in be["sensitivity"]]), ""]
 
     casc = BENCH_DIR / "cascade.csv"
     if casc.exists():
